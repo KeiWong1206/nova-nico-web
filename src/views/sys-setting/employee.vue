@@ -253,17 +253,21 @@ const getList = async () => {
 
 /** 获取联动字典数据 */
 const getOptions = async () => {
-  try {
-    // 并行获取门店和角色列表
-    const [venues, roles] = await Promise.all([
-      getVenueList(),
-      getRoleList()
-    ])
-    venueOptions.value = venues
-    roleOptions.value = roles
-  } catch (error) {
-    console.error('获取基础数据失败', error)
-  }
+  // 1. 获取门店列表
+  getVenueList().then(data => {
+    venueOptions.value = data
+  }).catch(err => {
+    console.error('加载门店字典失败:', err)
+  })
+
+  // 2. 获取角色列表（核心：对接真实接口）
+  getRoleList().then(data => {
+    console.log('Role List Fetched:', data) // 增加调试日志
+    roleOptions.value = data
+  }).catch(err => {
+    console.error('加载角色字典失败:', err)
+    ElMessage.warning('角色列表加载失败，请检查角色管理模块')
+  })
 }
 
 /** 搜索与重置 */
