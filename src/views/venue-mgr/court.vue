@@ -3,7 +3,8 @@
     <!-- 顶部搜索区域 -->
     <el-card class="search-card">
       <el-form :inline="true" :model="queryParams" ref="queryFormRef" class="search-form">
-        <el-form-item label="所属门店" prop="venueId">
+        <!-- 只有超管能选门店 -->
+        <el-form-item label="所属门店" prop="venueId" v-if="userStore.userInfo?.isSuperAdmin">
           <el-select v-model="queryParams.venueId" placeholder="选择门店" clearable style="width: 200px">
             <el-option
               v-for="item in venueOptions"
@@ -13,6 +14,7 @@
             />
           </el-select>
         </el-form-item>
+
         <el-form-item label="场地名称" prop="name">
           <el-input v-model="queryParams.name" placeholder="请输入场地名称" clearable @keyup.enter="handleQuery" />
         </el-form-item>
@@ -68,7 +70,7 @@
         </el-table-column>
         <el-table-column label="室内/外" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.isIndoor === 1 ? '' : 'info'">
+            <el-tag :type="scope.row.isIndoor === 1 ? 'primary' : 'info'">
               {{ scope.row.isIndoor === 1 ? '室内' : '室外' }}
             </el-tag>
           </template>
@@ -128,7 +130,8 @@
       @close="cancel"
     >
       <el-form ref="courtFormRef" :model="form" :rules="rules" label-width="100px" style="padding-top: 10px;">
-        <el-form-item label="所属门店" prop="venueId">
+        <!-- 新增/修改时同样根据权限展示场馆选择 -->
+        <el-form-item label="所属门店" prop="venueId" v-if="userStore.userInfo?.isSuperAdmin">
           <el-select v-model="form.venueId" placeholder="请选择所属门店" style="width: 100%">
             <el-option
               v-for="item in venueOptions"
@@ -182,7 +185,10 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, FormInstance, FormRules } from 'element-plus'
 import { getCourtPage, getCourt, saveCourt, deleteCourt, Court } from '@/api/court'
 import { getVenueList, Venue } from '@/api/venue'
+import { useUserStore } from '@/store/modules/user'
 import PriceRuleDrawer from './components/PriceRuleDrawer.vue'
+
+const userStore = useUserStore()
 
 // 业务字典定义
 const courtTypeOptions = [
@@ -217,7 +223,7 @@ const queryParams = reactive({
 // 表单对象
 const form = reactive<Court>({
   id: undefined,
-  venueId: undefined as any, // 初始化为 undefined 避免显示空字符串
+  venueId: undefined as any,
   name: '',
   courtType: 1,
   isIndoor: 1,
@@ -236,14 +242,15 @@ const rules = reactive<FormRules>({
 const getVenueOptions = async () => {
   try {
     const data = await getVenueList()
-    // 强制将门店 ID 转为字符串，并兼容后端可能的字段名差异 (id 或 venueId)
     venueOptions.value = data.map(item => {
       const actualId = item.id || (item as any).venueId
-      return {
-        ...item,
-        id: actualId ? String(actualId) : ''
-      }
+      return { ...item, id: actualId ? String(actualId) : '' }
     })
+    
+    // 非管理员：如果 queryParams.venueId 为空且 venueOptions 有值，默认选中第一个
+    if (!userStore.userInfo?.isSuperAdmin && !queryParams.venueId && venueOptions.value.length > 0) {
+      queryParams.venueId = venueOptions.value[0].id
+    }
   } catch (error) {
     console.error('加载门店列表失败', error)
   }
@@ -254,7 +261,6 @@ const getList = async () => {
   loading.value = true
   try {
     const data = await getCourtPage(queryParams)
-    // 同样将列表中的 venueId 转为字符串
     courtList.value = data.records.map(item => ({
       ...item,
       venueId: item.venueId ? String(item.venueId) : ''
@@ -299,12 +305,20 @@ const handleQuery = () => {
 /** 重置查询 */
 const resetQuery = () => {
   queryFormRef.value?.resetFields()
+  // 非管理员重置时，也要保留 venueId
+  if (!userStore.userInfo?.isSuperAdmin && venueOptions.value.length > 0) {
+    queryParams.venueId = venueOptions.value[0].id
+  }
   handleQuery()
 }
 
 /** 新增按钮 */
 const handleAdd = () => {
   reset()
+  // 非管理员新增时，自动填充其所属场馆
+  if (!userStore.userInfo?.isSuperAdmin && venueOptions.value.length > 0) {
+    form.venueId = venueOptions.value[0].id
+  }
   dialogTitle.value = '新增场地'
   dialogVisible.value = true
 }
@@ -315,13 +329,10 @@ const handleUpdate = async (row: Court) => {
   loading.value = true
   try {
     const data = await getCourt(row.id!)
-    // 直接赋值，保持 ID 为字符串，防止精度丢失
     Object.assign(form, data)
-    // 再次加固：确保 venueId 是字符串，以便 el-select 正确回显
     if (form.venueId) {
       form.venueId = String(form.venueId)
     }
-    
     dialogTitle.value = '修改场地'
     dialogVisible.value = true
   } finally {
@@ -385,7 +396,6 @@ const handleDelete = (row: Court) => {
 onMounted(async () => {
   loading.value = true
   try {
-    // 关键：必须先拿到门店列表，再请求场地列表，确保名称能顺序匹配上
     await getVenueOptions()
     await getList()
   } finally {
@@ -397,33 +407,12 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .court-container {
   padding: 0px;
-
-  .search-card {
-    margin-bottom: 15px;
-    border: none;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
-  }
-
+  .search-card { margin-bottom: 15px; border: none; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); }
   .table-card {
-    border: none;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
-
-    .table-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+    border: none; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+    .table-header { display: flex; justify-content: space-between; align-items: center; }
   }
-
-  .pagination-container {
-    margin-top: 20px;
-    display: flex;
-    justify-content: flex-end;
-  }
+  .pagination-container { margin-top: 20px; display: flex; justify-content: flex-end; }
 }
-
-:deep(.el-card__header) {
-  padding: 15px 20px;
-  border-bottom: 1px solid #f0f2f5;
-}
+:deep(.el-card__header) { padding: 15px 20px; border-bottom: 1px solid #f0f2f5; }
 </style>

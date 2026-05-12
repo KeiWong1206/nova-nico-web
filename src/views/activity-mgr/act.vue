@@ -41,8 +41,8 @@
         <el-table-column prop="activityName" label="活动名称" min-width="180" show-overflow-tooltip />
         <el-table-column label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="getStatusTag(scope.row.status)" effect="dark">
-              {{ getStatusLabel(scope.row.status) }}
+            <el-tag :type="getStatusTag(scope.row?.status)" effect="dark">
+              {{ getStatusLabel(scope.row?.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -53,16 +53,25 @@
         </el-table-column>
         <el-table-column label="活动周期" min-width="320" align="center">
           <template #default="scope">
-            <div class="time-range-display">
+            <div class="time-range-display" v-if="scope.row?.startTime">
               <span class="time">{{ scope.row.startTime }}</span>
               <span class="sep">至</span>
               <span class="time">{{ scope.row.endTime }}</span>
             </div>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="createTime" label="创建时间" width="170" align="center" />
-        <el-table-column label="操作" width="220" align="center" fixed="right">
+        <el-table-column label="操作" width="300" align="center" fixed="right">
           <template #default="scope">
+            <el-button
+              link
+              type="primary"
+              icon="Setting"
+              @click="handleConfigCoupons(scope.row)"
+            >
+              配置券
+            </el-button>
             <el-button
               v-if="[1, 2].includes(scope.row.status)"
               v-hasPermi="['activity:update']"
@@ -138,21 +147,25 @@
         <el-button type="primary" :loading="submitLoading" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 优惠券配置抽屉 -->
+    <ActivityCouponDrawer ref="couponDrawerRef" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, FormInstance, FormRules } from 'element-plus'
+import ActivityCouponDrawer from './components/ActivityCouponDrawer.vue'
 import { 
   getActivityPage, 
-  getActivityDetail, 
   createActivity, 
   updateActivity, 
   deleteActivity, 
   closeActivity,
+  getActivityDetail,
   CouponActivityVO 
-} from '@/api/coupon-activity'
+} from '@/api/activityCoupon'
 
 // 业务字典
 const statusOptions = [
@@ -189,6 +202,7 @@ const queryParams = reactive({
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const activityFormRef = ref<FormInstance>()
+const couponDrawerRef = ref<InstanceType<typeof ActivityCouponDrawer>>()
 
 interface ActivityForm extends Partial<CouponActivityVO> {
   timeRange?: [string, string]
@@ -211,6 +225,7 @@ const rules = reactive<FormRules>({
 
 /** 获取列表 */
 const getList = async () => {
+  console.log('发起活动列表请求, 参数:', queryParams)
   loading.value = true
   try {
     if (dateRange.value && dateRange.value.length === 2) {
@@ -222,8 +237,12 @@ const getList = async () => {
     }
     
     const data = await getActivityPage(queryParams)
+    console.log('请求成功, 返回数据:', data)
     activityList.value = data.records
     total.value = data.total
+  } catch (error: any) {
+    console.error('列表请求失败:', error)
+    ElMessage.error('获取列表数据失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
   }
@@ -261,6 +280,11 @@ const handleUpdate = async (row: CouponActivityVO) => {
     dialogTitle.value = '修改活动'
     dialogVisible.value = true
   } catch (error) {}
+}
+
+/** 配置优惠券 */
+const handleConfigCoupons = (row: CouponActivityVO) => {
+  couponDrawerRef.value?.openDrawer(row.id!)
 }
 
 /** 提交表单 */
@@ -313,11 +337,13 @@ const handleDelete = (row: CouponActivityVO) => {
 }
 
 const getStatusLabel = (val: number) => {
+  if (val === undefined || val === null) return '未知'
   const item = statusOptions.find(opt => opt.value === val)
   return item ? item.label : '未知'
 }
 
 const getStatusTag = (val: number) => {
+  if (val === undefined || val === null) return 'info'
   const item = statusOptions.find(opt => opt.value === val)
   return item ? (item.type as any) : 'info'
 }
